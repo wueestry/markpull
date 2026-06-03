@@ -1,3 +1,4 @@
+import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -281,22 +282,30 @@ def convert(
 
 
 def _save_with_images(doc, images_dir: Path) -> str:
-    """Use docling's save_as_markdown to write images directly to disk.
-
-    docling always embeds the absolute artifacts_dir path in markdown references,
-    so we replace it afterwards with just the directory name (relative to the
-    markdown file, which sits in images_dir.parent).
-    """
+    """Use docling's save_as_markdown to write images to disk, then rewrite
+    standard Markdown image refs as Obsidian wikilinks: ![[filename.png]]."""
     images_dir.mkdir(parents=True, exist_ok=True)
     abs_dir = images_dir.resolve()
     tmp = images_dir.parent / f".markpull-{uuid.uuid4().hex[:8]}.md"
     try:
         doc.save_as_markdown(tmp, artifacts_dir=abs_dir, image_mode=ImageRefMode.REFERENCED)
         md = tmp.read_text(encoding="utf-8")
-        # "!/abs/path/to/assets/img.png" → "!/assets_dirname/img.png"
-        return md.replace(str(abs_dir) + "/", images_dir.name + "/")
+        return _to_wikilinks(md, abs_dir)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def _to_wikilinks(md: str, abs_images_dir: Path) -> str:
+    """Rewrite ![alt](abs_images_dir/file.png) → ![[file.png]] in md."""
+    prefix = str(abs_images_dir) + "/"
+
+    def repl(m: re.Match) -> str:
+        path = m.group(1)
+        if path.startswith(prefix):
+            return f"![[{path[len(prefix):]}]]"
+        return m.group(0)
+
+    return re.sub(r'!\[[^\]]*\]\(([^)]+)\)', repl, md)
 
 
 def _strip_leading_h1(md: str, title: str) -> str:
