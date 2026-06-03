@@ -8,7 +8,8 @@ Built on [Docling](https://github.com/DS4SD/docling) for document parsing and in
 
 ## Features
 
-- **Universal input** — HTTP/HTTPS URLs, local HTML files, and PDFs
+- **Universal input** — HTTP/HTTPS URLs, local HTML files, PDFs, and YouTube videos
+- **YouTube transcripts** — extracts the full timestamped transcript; falls back to any available language if English isn't found
 - **Rich extraction** — tables, code blocks, mathematical formulas, and images preserved in Markdown
 - **Local image assets** — images saved as PNG files in a sibling `_assets/` folder; no base64 blobs in your notes
 - **Metadata frontmatter** — title, URL, author, publication date, description, and site extracted from Open Graph / meta tags
@@ -83,6 +84,12 @@ markpull report.pdf -o notes/report.md
 ```bash
 markpull https://example.com/article -c obsidian-web-clipper-settings.json
 # output path and frontmatter properties are driven by the config
+```
+
+**YouTube video — transcript with timestamps:**
+```bash
+markpull "https://www.youtube.com/watch?v=aircAruvnKk" -c obsidian-web-clipper-settings.json
+# → literature-sources/but-what-is-a-neural-network-deep-learning-chapter-1.md
 ```
 
 **HTML file, no images, no frontmatter:**
@@ -181,6 +188,7 @@ Output file names are always sanitized to remove filesystem-unsafe characters (`
 | Package | Role |
 |---------|------|
 | [docling](https://github.com/DS4SD/docling) | Document parsing and conversion |
+| [youtube-transcript-api](https://github.com/jdepoix/youtube-transcript-api) | YouTube transcript fetching |
 | [httpx](https://www.python-httpx.org/) | HTTP fetching |
 | [beautifulsoup4](https://www.crummy.com/software/BeautifulSoup/) | HTML metadata extraction |
 | [typer](https://typer.tiangolo.com/) | CLI framework |

@@ -1,7 +1,7 @@
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -104,8 +104,86 @@ def _extract_html_metadata(html: str, url: str | None = None) -> Metadata:
     )
 
 
+def _youtube_video_id(url: str) -> str | None:
+    """Return the YouTube video ID from any common URL form, or None."""
+    p = urlparse(url)
+    host = p.netloc.removeprefix("www.")
+    if host in ("youtube.com", "m.youtube.com"):
+        if p.path == "/watch":
+            return parse_qs(p.query).get("v", [None])[0]
+        if p.path.startswith(("/embed/", "/shorts/", "/v/")):
+            return p.path.split("/")[2] or None
+    if host == "youtu.be":
+        return p.path.lstrip("/") or None
+    return None
+
+
+def _fetch_youtube(url: str) -> PullResult:
+    """Fetch metadata + transcript for a YouTube video."""
+    from youtube_transcript_api import YouTubeTranscriptApi
+    from youtube_transcript_api._errors import CouldNotRetrieveTranscript
+
+    video_id = _youtube_video_id(url)
+    if not video_id:
+        raise ValueError(f"Could not extract video ID from: {url}")
+
+    # Metadata from og tags
+    metadata = Metadata(url=url)
+    try:
+        resp = httpx.get(url, follow_redirects=True, timeout=30,
+                         headers={"User-Agent": "markpull/0.1"})
+        resp.raise_for_status()
+        metadata = _extract_html_metadata(resp.text, url=url)
+    except Exception:
+        pass
+
+    # Transcript — try English first, then any available language
+    api = YouTubeTranscriptApi()
+    snippets = []
+    try:
+        fetched = api.fetch(video_id, languages=["en", "en-US", "en-GB"])
+        snippets = list(fetched)
+    except CouldNotRetrieveTranscript:
+        try:
+            available = api.list(video_id)
+            first = next(iter(available), None)
+            if first:
+                fetched = api.fetch(video_id, languages=[first.language_code])
+                snippets = list(fetched)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    md = _format_transcript(snippets)
+    return PullResult(markdown=md, metadata=metadata)
+
+
+def _format_transcript(snippets: list) -> str:
+    if not snippets:
+        return "*No transcript available for this video.*"
+
+    lines = ["## Transcript", ""]
+    for s in snippets:
+        start = int(s.start)
+        h, rem = divmod(start, 3600)
+        m, sec = divmod(rem, 60)
+        ts = f"{h:02d}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
+        lines.append(f"**[{ts}]** {s.text.strip().replace(chr(10), ' ')}")
+
+    return "\n".join(lines)
+
+
 def fetch_metadata(source: str) -> Metadata:
     """Lightweight metadata-only fetch — no docling, just HTTP + HTML parsing."""
+    if _youtube_video_id(source):
+        try:
+            resp = httpx.get(source, follow_redirects=True, timeout=30,
+                             headers={"User-Agent": "markpull/0.1"})
+            resp.raise_for_status()
+            return _extract_html_metadata(resp.text, url=source)
+        except Exception:
+            return Metadata(url=source)
     if _is_url(source):
         try:
             resp = httpx.get(
@@ -134,6 +212,9 @@ def convert(
     extract_images: bool = True,
     _prefetched_metadata: Metadata | None = None,
 ) -> PullResult:
+    if _youtube_video_id(source):
+        return _fetch_youtube(source)
+
     is_url = _is_url(source)
 
     if _prefetched_metadata is not None:
