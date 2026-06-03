@@ -41,11 +41,15 @@ def pull(
 ) -> None:
     extract_images = not no_images
 
-    # Load config
+    # Load config — explicit flag, then default location, then none
     template_config: cfg.MarkpullConfig | None = None
-    if config_file:
+    _default = cfg.default_config_path()
+    resolved_config = config_file or (_default if _default.exists() else None)
+    if resolved_config:
         try:
-            template_config = cfg.load_config(config_file)
+            template_config = cfg.load_config(resolved_config)
+            if config_file is None and verbose:
+                err.print(f"[dim]Using default config:[/dim] {resolved_config}")
         except Exception as exc:
             err.print(f"[bold red]Config error:[/bold red] {exc}")
             raise typer.Exit(1)

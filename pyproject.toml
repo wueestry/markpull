@@ -22,4 +22,4 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 sources = ["."]
-include = ["cli.py", "converter.py"]
+include = ["cli.py", "converter.py", "config.py"]

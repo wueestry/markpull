@@ -7,7 +7,9 @@ Filters:  |upper  |lower  |strip  |slug  |replace:"from":"to"  (chainable)
 """
 
 import json
+import os
 import re
+import sys
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -44,6 +46,14 @@ class MarkpullConfig:
             path=data.get("path", ""),
             properties=props,
         )
+
+
+def default_config_path() -> Path:
+    if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA", Path.home()))
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return base / "markpull" / "config.json"
 
 
 def load_config(path: str | Path) -> MarkpullConfig:
