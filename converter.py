@@ -210,6 +210,7 @@ def convert(
     source: str,
     images_dir: Path | None = None,
     extract_images: bool = True,
+    images_scale: float = 2.0,
     _prefetched_metadata: Metadata | None = None,
 ) -> PullResult:
     if _youtube_video_id(source):
@@ -241,9 +242,10 @@ def convert(
                 pass
 
     pdf_options = PdfPipelineOptions()
-    pdf_options.images_scale = 2.0
+    pdf_options.images_scale = images_scale
     pdf_options.generate_picture_images = extract_images
     pdf_options.generate_page_images = False
+    pdf_options.do_formula_enrichment = True
 
     html_backend_options = HTMLBackendOptions(
         fetch_images=extract_images,
