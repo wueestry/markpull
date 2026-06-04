@@ -8,7 +8,7 @@ import httpx
 from bs4 import BeautifulSoup
 from docling.backend.html_backend import HTMLBackendOptions
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.datamodel.pipeline_options import OcrAutoOptions, PdfPipelineOptions
 from docling.document_converter import DocumentConverter, HTMLFormatOption, PdfFormatOption
 from docling_core.types.doc import ImageRefMode
 
@@ -212,6 +212,7 @@ def convert(
     images_dir: Path | None = None,
     extract_images: bool = True,
     images_scale: float = 2.0,
+    full_page_ocr: bool = False,
     _prefetched_metadata: Metadata | None = None,
 ) -> PullResult:
     if _youtube_video_id(source):
@@ -247,6 +248,8 @@ def convert(
     pdf_options.generate_picture_images = extract_images
     pdf_options.generate_page_images = False
     pdf_options.do_formula_enrichment = True
+    if full_page_ocr:
+        pdf_options.ocr_options = OcrAutoOptions(force_full_page_ocr=True)
 
     html_backend_options = HTMLBackendOptions(
         fetch_images=extract_images,

@@ -33,6 +33,7 @@ def pull(
         help="Save images here. Defaults to <output-stem>_assets/ next to the output file.",
     ),
     no_images: bool = typer.Option(False, "--no-images", help="Skip image extraction."),
+    full_page_ocr: bool = typer.Option(False, "--full-page-ocr", help="Force full-page OCR (useful for scanned scientific journals)."),
     scale: float = typer.Option(2.0, "--scale", "-s", help="Image scale factor for extracted pictures (default: 2.0)."),
     frontmatter: bool = typer.Option(
         True, "--frontmatter/--no-frontmatter",
@@ -91,6 +92,7 @@ def pull(
                 images_dir=images_dir,
                 extract_images=extract_images,
                 images_scale=scale,
+                full_page_ocr=full_page_ocr,
                 _prefetched_metadata=prefetched,
             )
         except Exception as exc:
