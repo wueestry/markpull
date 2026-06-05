@@ -1,4 +1,6 @@
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -79,6 +81,14 @@ def pull(
     if extract_images and images_dir is None and output is not None:
         images_dir = output.parent / f"{output.stem}_assets"
 
+    # If template_config is set but output wasn't pre-resolved (e.g. a PDF whose title
+    # docling hasn't read yet), use a temp dir so we don't fall back to base64 embedding.
+    # Images are relocated to the final assets dir once the output path is known.
+    _temp_images_dir: Path | None = None
+    if extract_images and images_dir is None and template_config is not None:
+        _temp_images_dir = Path(tempfile.mkdtemp(prefix=".markpull-imgs-"))
+        images_dir = _temp_images_dir
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -97,6 +107,8 @@ def pull(
             )
         except Exception as exc:
             err.print(f"[bold red]Error:[/bold red] {exc}")
+            if _temp_images_dir is not None and _temp_images_dir.exists():
+                shutil.rmtree(_temp_images_dir, ignore_errors=True)
             raise typer.Exit(1)
 
     # Render output
@@ -116,6 +128,28 @@ def pull(
             output = cfg.resolve_output_path(template_config, variables)
     else:
         rendered = result.render(frontmatter=frontmatter)
+
+    # Relocate images from temp dir to the final assets dir now that output is known.
+    if _temp_images_dir is not None:
+        if output is not None:
+            images_dir = output.parent / f"{output.stem}_assets"
+            if _temp_images_dir.exists():
+                img_files = list(_temp_images_dir.iterdir())
+                if img_files:
+                    images_dir.mkdir(parents=True, exist_ok=True)
+                    for f in img_files:
+                        shutil.move(str(f), images_dir / f.name)
+        if _temp_images_dir.exists():
+            _temp_images_dir.rmdir()
+
+    # Rename images to <output-stem>-000N.<ext> and update wikilinks in rendered.
+    if output is not None and images_dir is not None and images_dir.exists():
+        stem = output.stem
+        for i, f in enumerate(sorted(images_dir.iterdir()), start=1):
+            new_name = f"{stem}-{i:04d}{f.suffix}"
+            if f.name != new_name:
+                rendered = rendered.replace(f"![[{f.name}]]", f"![[{new_name}]]")
+                f.rename(images_dir / new_name)
 
     # Write output
     if output:
