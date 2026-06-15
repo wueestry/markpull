@@ -13,7 +13,7 @@ import converter as conv
 
 app = typer.Typer(
     name="markpull",
-    help="Pull clean Markdown from a URL, HTML file, or PDF.",
+    help="Pull clean Markdown from a URL, HTML file, PDF, or EPUB.",
     add_completion=False,
     no_args_is_help=True,
 )
@@ -23,7 +23,7 @@ err = Console(stderr=True)
 
 @app.command()
 def pull(
-    source: str = typer.Argument(..., help="URL, HTML file, or PDF to convert."),
+    source: str = typer.Argument(..., help="URL, HTML file, PDF, or EPUB to convert."),
     output: Optional[Path] = typer.Option(
         None, "--output", "-o", help="Write output to file (default: stdout)."
     ),

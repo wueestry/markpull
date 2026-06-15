@@ -1,4 +1,6 @@
 import re
+import shutil
+import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -175,6 +177,138 @@ def _format_transcript(snippets: list) -> str:
     return "\n".join(lines)
 
 
+def _epub_dc(book, field: str) -> str | None:
+    items = book.get_metadata("DC", field)
+    for value, _ in items:
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
+def _extract_epub_metadata(path: str) -> Metadata:
+    import ebooklib.epub
+
+    book = ebooklib.epub.read_epub(path, options={"ignore_ncx": True})
+
+    title = _epub_dc(book, "title")
+
+    creators = [v.strip() for v, _ in book.get_metadata("DC", "creator") if v and v.strip()]
+    author = ", ".join(creators) if creators else None
+
+    published = _epub_dc(book, "date")
+    if published and "T" in published:
+        published = published.split("T")[0]
+
+    description = _epub_dc(book, "description")
+    site = _epub_dc(book, "publisher")
+
+    return Metadata(title=title, author=author, published=published, description=description, site=site)
+
+
+def _prepare_epub_for_docling(epub_path: str) -> tuple[Path, Path]:
+    import ebooklib
+    import ebooklib.epub
+
+    book = ebooklib.epub.read_epub(epub_path, options={"ignore_ncx": True})
+    tmp = Path(tempfile.mkdtemp(prefix=".markpull-epub-"))
+    images_subdir = tmp / "images"
+    images_subdir.mkdir()
+
+    # Extract images and build src → flat-name map
+    image_map: dict[str, str] = {}
+    used_names: set[str] = set()
+    for item in book.get_items_of_type(ebooklib.ITEM_IMAGE):
+        original = item.get_name()
+        flat = Path(original).name
+        if flat in used_names:
+            flat = f"{len(used_names):03d}-{flat}"
+        used_names.add(flat)
+        image_map[original] = flat
+        image_map[Path(original).name] = flat
+        (images_subdir / flat).write_bytes(item.get_content())
+
+    # Build combined HTML from spine items
+    title = _epub_dc(book, "title") or ""
+    seen_ids: set[str] = set()
+    body_parts: list[str] = []
+
+    for idref, _ in book.spine:
+        if idref in seen_ids:
+            continue
+        seen_ids.add(idref)
+        item = book.get_item_with_id(idref)
+        if item is None:
+            continue
+        raw = item.get_content()
+        if not raw:
+            continue
+        html = raw.decode("utf-8", errors="replace")
+        soup = BeautifulSoup(html, "html.parser")
+        body = soup.find("body") or soup
+
+        for img in body.find_all("img"):
+            src = img.get("src", "")
+            flat = image_map.get(src) or image_map.get(Path(src).name)
+            if flat:
+                img["src"] = f"images/{flat}"
+
+        body_parts.append(str(body) if body.name != "body" else body.decode_contents())
+
+    combined = (
+        f'<!DOCTYPE html><html><head><meta charset="utf-8"><title>{title}</title></head>'
+        f"<body>{'<hr>'.join(body_parts)}</body></html>"
+    )
+    combined_html = tmp / "content.html"
+    combined_html.write_text(combined, encoding="utf-8")
+    return combined_html, tmp
+
+
+def _convert_epub(
+    source: str,
+    images_dir: Path | None,
+    extract_images: bool,
+    images_scale: float,
+    _prefetched_metadata: "Metadata | None",
+) -> "PullResult":
+    try:
+        metadata = _prefetched_metadata or _extract_epub_metadata(source)
+    except Exception:
+        metadata = Metadata()
+
+    combined_html, tmp_dir = _prepare_epub_for_docling(source)
+    try:
+        html_opts = HTMLBackendOptions(
+            fetch_images=extract_images,
+            enable_local_fetch=extract_images,
+            enable_remote_fetch=False,
+            source_uri=str(combined_html),
+        )
+        doc_converter = DocumentConverter(
+            format_options={
+                InputFormat.HTML: HTMLFormatOption(backend_options=html_opts),
+            }
+        )
+        result = doc_converter.convert(str(combined_html))
+        doc = result.document
+
+        if not metadata.title and getattr(doc, "name", None):
+            metadata.title = doc.name
+
+        if not extract_images:
+            md = doc.export_to_markdown(image_mode=ImageRefMode.PLACEHOLDER)
+        elif images_dir is not None:
+            md = _save_with_images(doc, images_dir)
+        else:
+            md = doc.export_to_markdown(image_mode=ImageRefMode.EMBEDDED)
+
+        if metadata.title:
+            md = _strip_leading_h1(md, metadata.title)
+
+        return PullResult(markdown=md, metadata=metadata)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def fetch_metadata(source: str) -> Metadata:
     """Lightweight metadata-only fetch — no docling, just HTTP + HTML parsing."""
     if _youtube_video_id(source):
@@ -204,6 +338,11 @@ def fetch_metadata(source: str) -> Metadata:
             return _extract_html_metadata(Path(source).read_text(errors="replace"))
         except Exception:
             pass
+    if source.lower().endswith(".epub"):
+        try:
+            return _extract_epub_metadata(source)
+        except Exception:
+            pass
     return Metadata()
 
 
@@ -217,6 +356,15 @@ def convert(
 ) -> PullResult:
     if _youtube_video_id(source):
         return _fetch_youtube(source)
+
+    if not _is_url(source) and source.lower().endswith(".epub"):
+        return _convert_epub(
+            source,
+            images_dir=images_dir,
+            extract_images=extract_images,
+            images_scale=images_scale,
+            _prefetched_metadata=_prefetched_metadata,
+        )
 
     is_url = _is_url(source)
 
